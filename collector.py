@@ -7,7 +7,7 @@ from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import re
 import random
-import glob  # 👈 過去の全ファイルを検索するために新しく追加
+import glob
 
 KEYWORDS_MAPPING = {
     "東京電力": ["東京電力", "東電", "TEPCO", "テプコ"],
@@ -21,7 +21,6 @@ KEYWORDS_MAPPING = {
 
 JST = timezone(timedelta(hours=9))
 
-# 👈 【修正】実行時の日本時間ベースでファイル名を毎月自動決定（例: electricity_posts_2026_06.csv）
 current_month_str = datetime.now(JST).strftime("%Y_%m")
 CSV_FILE = f"electricity_posts_{current_month_str}.csv"
 
@@ -98,7 +97,6 @@ def fetch_posts(keyword):
             
             page.wait_for_timeout(random.randint(2000, 4000))
             
-            # ─── 【ガチ強化】5回スクロール ＆「もっと見る」ボタン自動連打 ───
             scroll_count = 5
             for i in range(scroll_count):
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -165,66 +163,67 @@ def fetch_posts(keyword):
         print(f"     [エラー詳細]: {e}")
         return []
 
-current_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
 
-# 👈 【新機能】月を跨いでも同じ投稿を二重回収しないよう、全CSVファイルから既知の投稿を事前にロード
-csv_files = glob.glob("electricity_posts_*.csv")
-known_posts = set()
-if csv_files:
-    for f in csv_files:
-        try:
-            old_df = pd.read_csv(f)
-            if not old_df.empty and "事業者" in old_df.columns and "本文" in old_df.columns:
-                for idx, row in old_df.iterrows():
-                    known_posts.add((str(row["事業者"]), clean_text(str(row["本文"]))))
-        except:
-            pass
+# ─── 【大修正】ここから下の実行処理を「防壁」の中に格納 ───
+# これにより、GitHub Actionsや手元で直接実行した時だけ動き、Streamlitに読み込まれた時は完全に黙ります。
+if __name__ == "__main__":
+    current_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
 
-all_new_posts = []
-
-for company, keywords in KEYWORDS_MAPPING.items():
-    print(f"🔍 {company} の収集を開始します（対象キーワード: {', '.join(keywords)}）")
-    
-    for keyword in keywords:
-        tweets = fetch_posts(keyword)
-        for post, post_time in tweets:
-            # 👈 過去のすべてのファイルと照合して重複をスキップ
-            if (company, clean_text(post)) in known_posts:
-                continue
-                
+    csv_files = glob.glob("electricity_posts_*.csv")
+    known_posts = set()
+    if csv_files:
+        for f in csv_files:
             try:
-                res = analyzer(post)[0]
-                label = res['label'].lower()
-                if 'positive' in label:
-                    sentiment = 'ポジティブ'
-                elif 'negative' in label:
-                    sentiment = 'ネガティブ'
-                else:
-                    sentiment = 'ニュートラル'
+                old_df = pd.read_csv(f)
+                if not old_df.empty and "事業者" in old_df.columns and "本文" in old_df.columns:
+                    for idx, row in old_df.iterrows():
+                        known_posts.add((str(row["事業者"]), clean_text(str(row["本文"]))))
             except:
-                sentiment = 'ニュートラル'
-                
-            all_new_posts.append({
-                "収集日時": current_time,
-                "投稿日時": post_time,
-                "事業者": company,
-                "本文": post,
-                "判定": sentiment
-            })
+                pass
 
-if all_new_posts:
-    df_new = pd.DataFrame(all_new_posts)
-    df_new["本文"] = df_new["本文"].apply(clean_text)
-    
-    # 👈 今月用のCSVが存在すれば合体、なければ今月初のファイルとして新規作成
-    if os.path.exists(CSV_FILE):
-        df_old = pd.read_csv(CSV_FILE)
-        df_old["本文"] = df_old["本文"].apply(clean_text)
-        df_combined = pd.concat([df_old, df_new]).drop_duplicates(subset=["事業者", "本文"], keep="first")
-    else:
-        df_combined = df_new
+    all_new_posts = []
+
+    for company, keywords in KEYWORDS_MAPPING.items():
+        print(f"🔍 {company} の収集を開始します（対象キーワード: {', '.join(keywords)}）")
         
-    df_combined.to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
-    print(f"✨ 今月のデータファイル【{CSV_FILE}】に保存しました。今月の総蓄積件数: {len(df_combined)} 件")
-else:
-    print("❌ 新しいポストは見つかりませんでした。")
+        for keyword in keywords:
+            tweets = fetch_posts(keyword)
+            for post, post_time in tweets:
+                if (company, clean_text(post)) in known_posts:
+                    continue
+                    
+                try:
+                    res = analyzer(post)[0]
+                    label = res['label'].lower()
+                    if 'positive' in label:
+                        sentiment = 'ポジティブ'
+                    elif 'negative' in label:
+                        sentiment = 'ネガティブ'
+                    else:
+                        sentiment = 'ニュートラル'
+                except:
+                    sentiment = 'ニュートラル'
+                    
+                all_new_posts.append({
+                    "収集日時": current_time,
+                    "投稿日時": post_time,
+                    "事業者": company,
+                    "本文": post,
+                    "判定": sentiment
+                })
+
+    if all_new_posts:
+        df_new = pd.DataFrame(all_new_posts)
+        df_new["本文"] = df_new["本文"].apply(clean_text)
+        
+        if os.path.exists(CSV_FILE):
+            df_old = pd.read_csv(CSV_FILE)
+            df_old["本文"] = df_old["本文"].apply(clean_text)
+            df_combined = pd.concat([df_old, df_new]).drop_duplicates(subset=["事業者", "本文"], keep="first")
+        else:
+            df_combined = df_new
+            
+        df_combined.to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
+        print(f"✨ 今月のデータファイル【{CSV_FILE}】に保存しました。今月の総蓄積件数: {len(df_combined)} 件")
+    else:
+        print("❌ 新しいポストは見つかりませんでした。")
