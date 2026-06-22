@@ -1,230 +1,274 @@
-import os
-import urllib.parse
+import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta, timezone
-from transformers import pipeline
-from playwright.sync_api import sync_playwright
-from bs4 import BeautifulSoup
-import re
-import random
-import glob  # 👈 過去の全ファイルを検索するために新しく追加
+import matplotlib.pyplot as plt
+import os
+import japanize_matplotlib
+import glob  # 👈 【追加】複数ファイルを一括探索するためのライブラリ
 
-KEYWORDS_MAPPING = {
-    "東京電力": ["東京電力", "東電", "TEPCO", "テプコ"],
-    "関西電力": ["関西電力", "関電", "KEPCO"],
-    "中部電力": ["中部電力", "中電"],
-    "九州電力": ["九州電力", "九電"],
-    "リボンエナジー": ["リボンエナジー", "リボン電気"],
-    "オクトパスエナジー": ["オクトパスエナジー", "オクトパス電気"],
-    "looopでんき": ["looopでんき", "ループ電気", "ループでんき", "loop電気"]
+st.set_page_config(
+    page_title="電気事業者 SNS分析ボード",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+st.markdown("""
+    <style>
+    div[data-testid="stToolbar"] {
+        visibility: hidden;
+    }
+    header {
+        visibility: visible !important;
+        background: rgba(255, 255, 255, 0);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+st.title("⚡ 電気事業者 Xトレンド分析システム")
+
+# 👈 今までの単一ファイル指定を廃止し、"electricity_posts_*.csv" にマッチするファイルをすべて探す仕様に変更
+csv_files = glob.glob("electricity_posts_*.csv")
+
+NEG_TREND_WORDS = ["高い", "値上げ", "電気代", "停電", "不満", "外資", "提携", "まずい", "高騰", "リスク", "負担", "最悪", "不便", "エラー", "繋がらない", "解約", "料金", "乗っ取り", "ボイコット", "高すぎ"]
+POS_TREND_WORDS = ["安い", "お得", "便利", "助かる", "おすすめ", "オススメ", "満足", "ポイント", "キャンペーン", "節約", "キャッシュバック", "親切", "安心", "乗り換え", "招待コード", "最適"]
+
+TOPIC_KEYWORDS = {
+    "価格・料金プラン": ["高い", "安い", "値上げ", "値下げ", "料金", "電気代", "高騰", "請求", "節電", "家計", "燃料費"],
+    "サービス・操作性": ["便利", "不便", "アプリ", "サイト", "マイページ", "ログイン", "手続き", "対応", "電話", "繋がらない", "ポイント", "契約", "解約"],
+    "インフラ・停電リスク": ["停電", "復旧", "ついた", "消えた", "災害", "台風", "落雷", "送電", "発電", "原発", "火力"],
+    "企業姿勢・ニュース": ["国有化", "株式", "外資", "提携", "買収", "株価", "経営", "投資", "ニュース", "不祥事", "カルテル"]
 }
 
-JST = timezone(timedelta(hours=9))
+def assign_topics(text):
+    if pd.isna(text):
+        return ["その他"]
+    text_lower = str(text).lower()
+    matched_topics = []
+    for topic, keywords in TOPIC_KEYWORDS.items():
+        for kw in keywords:
+            if kw in text_lower:
+                matched_topics.append(topic)
+                break
+    return matched_topics if matched_topics else ["その他"]
 
-# 👈 【修正】実行時の日本時間ベースでファイル名を毎月自動決定（例: electricity_posts_2026_06.csv）
-current_month_str = datetime.now(JST).strftime("%Y_%m")
-CSV_FILE = f"electricity_posts_{current_month_str}.csv"
+def get_top_words(posts, word_list, top_n=5):
+    counts = {}
+    for kw in word_list:
+        counts[kw] = posts.str.contains(kw, case=False, na=False).sum()
+    sorted_words = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+    return [item for item in sorted_words if item[1] > 0][:top_n]
 
-analyzer = pipeline("sentiment-analysis", model="cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual")
-
-def clean_text(text):
-    if not text:
-        return ""
-    text = re.sub(r'[\r\n\t]+', ' ', text)
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
-
-def parse_tweet_time(time_text):
-    now = datetime.now(JST).replace(tzinfo=None)
-    if not time_text:
-        return now
-        
-    try:
-        if "T" in time_text and ("+" in time_text or "Z" in time_text):
-            dt_str = time_text.split("+")[0].split("Z")[0]
-            return datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%S")
-        if time_text.isdigit() and len(time_text) >= 10:
-            return datetime.fromtimestamp(int(time_text[:10]))
-
-        if "秒" in time_text:
-            num = int(re.search(r'(\d+)', time_text).group(1))
-            return now - timedelta(seconds=num)
-        elif "分" in time_text:
-            num = int(re.search(r'(\d+)', time_text).group(1))
-            return now - timedelta(minutes=num)
-        elif "時間" in time_text:
-            num = int(re.search(r'(\d+)', time_text).group(1))
-            return now - timedelta(hours=num)
-            
-        if "昨日" in time_text:
-            time_match = re.search(r'(\d{1,2}:\d{2})', time_text)
-            if time_match:
-                time_str = time_match.group(1)
-                yesterday = now - timedelta(days=1)
-                return datetime.strptime(f"{yesterday.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M")
-
-        time_match = re.search(r'(\d{1,2}:\d{2})', time_text)
-        month_day_match = re.search(r'(\d{1,2})月(\d{1,2})日', time_text)
-
-        if time_match and not month_day_match:
-            time_str = time_match.group(1)
-            parsed_dt = datetime.strptime(f"{now.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M")
-            if parsed_dt > now:
-                parsed_dt -= timedelta(days=1)
-            return parsed_dt
-
-        if month_day_match:
-            year_match = re.search(r'(\d{4})年', time_text)
-            year = year_match.group(1) if year_match else str(now.year)
-            month = month_day_match.group(1)
-            day = month_day_match.group(2)
-            time_str = time_match.group(1) if time_match else "00:00"
-            return datetime.strptime(f"{year}-{month}-{day} {time_str}", "%Y-%m-%d %H:%M")
-
-    except:
-        pass
-    return now
-
-def fetch_posts(keyword):
-    encoded_keyword = urllib.parse.quote(keyword)
-    url = f"https://search.yahoo.co.jp/realtime/search?p={encoded_keyword}"
-    
-    raw_tweets = {}
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto(url)
-            
-            page.wait_for_timeout(random.randint(2000, 4000))
-            
-            # ─── 【ガチ強化】5回スクロール ＆「もっと見る」ボタン自動連打 ───
-            scroll_count = 5
-            for i in range(scroll_count):
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                page.wait_for_timeout(random.randint(1000, 2000))
-                
-                try:
-                    more_btn = page.get_by_text("もっと見る", exact=False)
-                    if more_btn.is_visible():
-                        more_btn.click()
-                        page.wait_for_timeout(random.randint(2000, 3500))
-                except:
-                    pass
-            
-            html = page.content()
-            browser.close()
-            
-        soup = BeautifulSoup(html, 'html.parser')
-        
-        elements = soup.find_all(["p", "div", "li"])
-        for elem in elements:
-            class_str = " ".join(elem.get("class", []))
-            if any(k in class_str for k in ["Tweet", "text", "Text", "body", "Content"]):
-                text = clean_text(elem.get_text())
-                
-                if 15 < len(text) < 280 and keyword.lower() in text.lower():
-                    if "検索" in text and "ID" in text:
-                        continue
-                    if any(w in text for w in ["その他の投稿", "もっと見る", "メニューを開く", "公式アカウント", "関連ワード", "元のツイート"]):
-                        continue
-                    
-                    time_text = ""
-                    current = elem
-                    
-                    while current:
-                        time_elem = current.find(lambda tag: tag.name == "time" or any("Tweet_time" in c for c in tag.get("class", [])))
-                        if time_elem:
-                            dt_attr = time_elem.get("datetime")
-                            time_text = clean_text(dt_attr) if dt_attr else clean_text(time_elem.get_text())
-                            break
-                        current = current.parent
-                    
-                    if not time_text:
-                        time_text = "今日 00:00"
-                        
-                    raw_tweets[text] = time_text
-                        
-        sorted_texts = sorted(raw_tweets.keys(), key=len)
-        final_tweets = []
-        for t in sorted_texts:
-            is_duplicate_parent = False
-            for adopted_text, _ in final_tweets:
-                if adopted_text in t:
-                    is_duplicate_parent = True
-                    break
-            
-            if not is_duplicate_parent:
-                parsed_time = parse_tweet_time(raw_tweets[t]).strftime("%Y-%m-%d %H:%M:%S")
-                final_tweets.append((t, parsed_time))
-                
-        print(f"     [解析状況] 「{keyword}」で {len(final_tweets)} 件抽出（重複・ノイズ全カット済）")
-        return final_tweets
-        
-    except Exception as e:
-        print(f"     [エラー詳細]: {e}")
-        return []
-
-current_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
-
-# 👈 【新機能】月を跨いでも同じ投稿を二重回収しないよう、全CSVファイルから既知の投稿を事前にロード
-csv_files = glob.glob("electricity_posts_*.csv")
-known_posts = set()
+# 👈 【修正】CSVファイルが1つでも見つかったら処理を開始
 if csv_files:
-    for f in csv_files:
-        try:
-            old_df = pd.read_csv(f)
-            if not old_df.empty and "事業者" in old_df.columns and "本文" in old_df.columns:
-                for idx, row in old_df.iterrows():
-                    known_posts.add((str(row["事業者"]), clean_text(str(row["本文"]))))
-        except:
-            pass
-
-all_new_posts = []
-
-for company, keywords in KEYWORDS_MAPPING.items():
-    print(f"🔍 {company} の収集を開始します（対象キーワード: {', '.join(keywords)}）")
+    # 👈 見つかった月別のCSVファイルをすべて読み込んで、裏で縦に1つに自動結合します
+    df = pd.concat([pd.read_csv(f) for f in csv_files], ignore_index=True)
     
-    for keyword in keywords:
-        tweets = fetch_posts(keyword)
-        for post, post_time in tweets:
-            # 👈 過去のすべてのファイルと照合して重複をスキップ
-            if (company, clean_text(post)) in known_posts:
-                continue
-                
-            try:
-                res = analyzer(post)[0]
-                label = res['label'].lower()
-                if 'positive' in label:
-                    sentiment = 'ポジティブ'
-                elif 'negative' in label:
-                    sentiment = 'ネガティブ'
-                else:
-                    sentiment = 'ニュートラル'
-            except:
-                sentiment = 'ニュートラル'
-                
-            all_new_posts.append({
-                "収集日時": current_time,
-                "投稿日時": post_time,
-                "事業者": company,
-                "本文": post,
-                "判定": sentiment
-            })
-
-if all_new_posts:
-    df_new = pd.DataFrame(all_new_posts)
-    df_new["本文"] = df_new["本文"].apply(clean_text)
-    
-    # 👈 今月用のCSVが存在すれば合体、なければ今月初のファイルとして新規作成
-    if os.path.exists(CSV_FILE):
-        df_old = pd.read_csv(CSV_FILE)
-        df_old["本文"] = df_old["本文"].apply(clean_text)
-        df_combined = pd.concat([df_old, df_new]).drop_duplicates(subset=["事業者", "本文"], keep="first")
+    df["収集日時"] = pd.to_datetime(df["収集日時"])
+    if "投稿日時" in df.columns:
+        df["投稿日時"] = pd.to_datetime(df["投稿日時"])
+        df["投稿日時"] = df["投稿日時"].fillna(df["収集日時"])
     else:
-        df_combined = df_new
+        df["投稿日時"] = df["収集日時"]
+    
+    st.sidebar.header("📊 分析条件設定")
+    company = st.sidebar.selectbox("分析対象の事業者", ["東京電力", "関西電力", "中部電力", "九州電力", "リボンエナジー", "オクトパスエナジー", "looopでんき"])
+    
+    period_type = st.sidebar.radio(
+        "期間の指定方法", 
+        ["直近7日間（デフォルト）", "特定の日を指定", "特定の期間（週など）を範囲指定", "特定の月を指定", "全期間"], 
+        index=0
+    )
+    
+    df_filtered = df[df["事業者"] == company].copy()
+    
+    now = pd.Timestamp.now()
+    
+    if period_type == "直近7日間（デフォルト）":
+        df_filtered = df_filtered[df_filtered["投稿日時"] >= now - pd.Timedelta(days=7)]
         
-    df_combined.to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
-    print(f"✨ 今月のデータファイル【{CSV_FILE}】に保存しました。今月の総蓄積件数: {len(df_combined)} 件")
+    elif period_type == "特定の日を指定":
+        selected_date = st.sidebar.date_input("日付を選択", now.date())
+        df_filtered = df_filtered[df_filtered["投稿日時"].dt.date == selected_date]
+        
+    elif period_type == "特定の期間（週など）を範囲指定":
+        selected_range = st.sidebar.date_input(
+            "開始日と終了日を選択（同日選択で1週間などの調整可）", 
+            [now.date() - pd.Timedelta(days=7), now.date()]
+        )
+        if len(selected_range) == 2:
+            start_date, end_date = selected_range
+            df_filtered = df_filtered[
+                (df_filtered["投稿日時"].dt.date >= start_date) & 
+                (df_filtered["投稿日時"].dt.date <= end_date)
+            ]
+            
+    elif period_type == "特定の月を指定":
+        df["_year_month"] = df["投稿日時"].dt.strftime("%Y-%m")
+        unique_months = sorted(df["_year_month"].unique(), reverse=True)
+        if unique_months:
+            selected_month = st.sidebar.selectbox("月を選択", unique_months)
+            df_filtered = df_filtered[df_filtered["投稿日時"].dt.strftime("%Y-%m") == selected_month]
+        else:
+            st.sidebar.info("選択可能な月がありません")
+
+    df_filtered["表示日時"] = df_filtered["投稿日時"].dt.strftime("%Y-%m-%d %H:%M")
+    
+    df_filtered['_topics'] = df_filtered['本文'].apply(assign_topics)
+    df_exploded = df_filtered.explode('_topics').reset_index(drop=True)
+
+    main_tab, raw_tab = st.tabs(["📈 高度トレンド分析（クロス集計）", "📝 感情別 投稿一覧"])
+    
+    with main_tab:
+        st.markdown(f"### 📊 {company} の感情別フォアグラウンド・キーワード（全体トレンド）")
+        st.caption("ポジティブ／ネガティブな投稿のそれぞれで、今どんな言葉が多く使われているかのトップ5です")
+        
+        col_w1, col_w2 = st.columns(2)
+        
+        with col_w1:
+            df_pos_all = df_filtered[df_filtered["判定"] == "ポジティブ"]
+            top_pos = get_top_words(df_pos_all['本文'], POS_TREND_WORDS)
+            
+            if top_pos:
+                words_p, counts_p = zip(*top_pos)
+                fig_p, ax_p = plt.subplots(figsize=(6, 2))
+                ax_p.barh(words_p[::-1], counts_p[::-1], color='#99ff99')
+                ax_p.set_title("🟢 ポジティブ投稿の頻出ワード TOP5", fontsize=10, color="green")
+                ax_p.set_xlabel("言及件数 (件)", fontsize=8)
+                ax_p.grid(axis='x', linestyle='--', alpha=0.5)
+                st.pyplot(fig_p)
+            else:
+                st.info("🟢 ポジティブな特有ワードはまだ検出されていません。")
+                
+        with col_w2:
+            df_neg_all = df_filtered[df_filtered["判定"] == "ネガティブ"]
+            top_neg = get_top_words(df_neg_all['本文'], NEG_TREND_WORDS)
+            
+            if top_neg:
+                words_n, counts_n = zip(*top_neg)
+                fig_n, ax_n = plt.subplots(figsize=(6, 2))
+                ax_n.barh(words_n[::-1], counts_n[::-1], color='#ff9999')
+                ax_n.set_title("🔴 ネガティブ投稿の頻出ワード TOP5", fontsize=10, color="red")
+                ax_n.set_xlabel("言及件数 (件)", fontsize=8)
+                ax_n.grid(axis='x', linestyle='--', alpha=0.5)
+                st.pyplot(fig_n)
+            else:
+                st.info("🔴 ネガティブな特有ワードはまだ検出されていません。")
+                
+        st.markdown("---")
+        
+        st.subheader("🎯 話動（トピック）× 感情のクロス分析")
+        col1, col2 = st.columns([3, 2])
+        
+        with col1:
+            if not df_exploded.empty:
+                pivot_df = pd.crosstab(df_exploded['_topics'], df_exploded['判定'])
+                for col in ['ポジティブ', 'ニュートラル', 'ネガティブ']:
+                    if col not in pivot_df.columns:
+                        pivot_df[col] = 0
+                pivot_df = pivot_df[['ポジティブ', 'ニュートラル', 'ネガティブ']]
+                
+                fig, ax = plt.subplots(figsize=(8, 4.5))
+                pivot_df.plot(kind='barh', stacked=True, color=['#99ff99', '#dddddd', '#ff9999'], ax=ax)
+                ax.set_title('話題別の感情ボリューム（件数）', fontsize=12, pad=10)
+                ax.set_xlabel('検出された投稿数（件）')
+                ax.set_ylabel('話題カテゴリ')
+                ax.grid(axis='x', linestyle='--', alpha=0.5)
+                plt.legend(title="世論の感情", loc='lower right')
+                st.pyplot(fig)
+            else:
+                st.info("分析可能なデータがありません。")
+                
+        with col2:
+            st.markdown("### 💡 選択された話題の「具体的な中身」")
+            selected_topic = st.selectbox("詳細を覗きたい話題を選択", list(TOPIC_KEYWORDS.keys()) + ["ignore_other"])
+            
+            topic_key = "その他" if selected_topic == "ignore_other" else selected_topic
+            df_topic_view = df_filtered[df_filtered['_topics'].apply(lambda x: topic_key in x)].copy()
+            
+            if not df_topic_view.empty:
+                if topic_key != "その他":
+                    st.write("📊 **この話題で特によく使われている言葉（上位）**")
+                    keywords_to_check = TOPIC_KEYWORDS[topic_key]
+                    sub_counts = {}
+                    for kw in keywords_to_check:
+                        sub_counts[kw] = df_topic_view['本文'].str.contains(kw, case=False, na=False).sum()
+                    
+                    sorted_sub = sorted(sub_counts.items(), key=lambda x: x[1], reverse=True)
+                    badge_line = ""
+                    for k, v in sorted_sub[:4]:
+                        if v > 0:
+                            badge_line += f"`{k}({v}件)`   "
+                    if badge_line:
+                        st.markdown(badge_line)
+                
+                st.write("")
+                st.write("💬 **多くの内容を含んでいる代表的な投稿（システム自動選抜）**")
+                df_topic_view['text_len'] = df_topic_view['本文'].str.len()
+                rep_posts = df_topic_view.sort_values(by='text_len', ascending=False).head(3)
+                
+                for idx, row in rep_posts.iterrows():
+                    icon = "🟢【満足】" if row['判定'] == "ポジティブ" else ("🔴【不慢】" if row['判定'] == "ネガティブ" else "⚪【その他】")
+                    st.info(f"{icon} {row['本文']}")
+                
+                st.write("")
+                st.write("▼ 関連する投稿一覧（最新順・全件スクロール表示）")
+                df_topic_sorted = df_topic_view.sort_values(by="投稿日時", ascending=False)
+                st.dataframe(
+                    df_topic_sorted[["表示日時", "本文", "判定"]],
+                    column_config={"本文": st.column_config.TextColumn("本文", width="large")},
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.info("該当するデータがまだありません。")
+            
+    # ==========================================
+    # タブ2：感情別 投稿一覧
+    # ==========================================
+    with raw_tab:
+        col3, col4 = st.columns([3, 2])
+        with col3:
+            st.subheader("📋 感情セグメント別の一覧表示")
+            sub_tab1, sub_tab2, sub_tab3 = st.tabs(["🟢 ポジティブな投稿", "🔴 ネガティブな投稿", "⚪ 全ての投稿"])
+            
+            with sub_tab1:
+                df_pos = df_filtered[df_filtered["判定"] == "ポジティブ"].sort_values(by="投稿日時", ascending=False)
+                st.write(f"✨ ポジティブ件数: {len(df_pos)} 件")
+                st.dataframe(
+                    df_pos[["表示日時", "本文"]],
+                    column_config={"本文": st.column_config.TextColumn("本文", width="large")},
+                    use_container_width=True,
+                    hide_index=True
+                )
+            with sub_tab2:
+                df_neg = df_filtered[df_filtered["判定"] == "ネガティブ"].sort_values(by="投稿日時", ascending=False)
+                st.write(f"💥 ネガティブ件数: {len(df_neg)} 件")
+                st.dataframe(
+                    df_neg[["表示日時", "本文"]],
+                    column_config={"本文": st.column_config.TextColumn("本文", width="large")},
+                    use_container_width=True,
+                    hide_index=True
+                )
+            with sub_tab3:
+                df_all_sorted = df_filtered.sort_values(by="投稿日時", ascending=False)
+                st.write(f"📝 総投稿数: {len(df_all_sorted)} 件")
+                st.dataframe(
+                    df_all_sorted[["表示日時", "本文", "判定"]],
+                    column_config={"本文": st.column_config.TextColumn("本文", width="large")},
+                    use_container_width=True,
+                    hide_index=True
+                )
+                
+        with col4:
+            st.write("")
+            st.write("")
+            counts = df_filtered["判定"].value_counts()
+            if not counts.empty:
+                fig2, ax2 = plt.subplots(figsize=(4.5, 4.5))
+                ax2.pie(counts, labels=counts.index, autopct='%1.1f%%', startangle=90, 
+                       colors=['#ff9999','#66b3ff','#99ff99'], textprops={'fontsize': 12})
+                ax2.set_title("全体的な感情比率", fontsize=12)
+                st.pyplot(fig2)
+
 else:
-    print("❌ 新しいポストは見つかりませんでした。")
+    st.info("まだデータが蓄積されていません。最初の自動収集をお待ちください。")
