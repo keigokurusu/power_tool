@@ -69,7 +69,6 @@ if os.path.exists(CSV_FILE):
     st.sidebar.header("📊 分析条件設定")
     company = st.sidebar.selectbox("分析対象の事業者", ["東京電力", "関西電力", "中部電力", "九州電力", "リボンエナジー", "オクトパスエナジー", "looopでんき"])
     
-    # 期間の指定方法を選択するメニュー
     period_type = st.sidebar.radio(
         "期間の指定方法", 
         ["直近7日間（デフォルト）", "特定の日を指定", "特定の期間（週など）を範囲指定", "特定の月を指定", "全期間"], 
@@ -80,7 +79,6 @@ if os.path.exists(CSV_FILE):
     
     now = pd.Timestamp.now()
     
-    # 選択された指定方法に応じてフィルター処理を切り替え
     if period_type == "直近7日間（デフォルト）":
         df_filtered = df_filtered[df_filtered["投稿日時"] >= now - pd.Timedelta(days=7)]
         
@@ -146,7 +144,7 @@ if os.path.exists(CSV_FILE):
                 fig_n, ax_n = plt.subplots(figsize=(6, 2))
                 ax_n.barh(words_n[::-1], counts_n[::-1], color='#ff9999')
                 ax_n.set_title("🔴 ネガティブ投稿の頻出ワード TOP5", fontsize=10, color="red")
-                ax_n.set_xlabel("言及件数 (件)", fontsize=8)
+                ax_n.set_xlabel("言言件数 (件)", fontsize=8)
                 ax_n.grid(axis='x', linestyle='--', alpha=0.5)
                 st.pyplot(fig_n)
             else:
@@ -209,9 +207,11 @@ if os.path.exists(CSV_FILE):
                     st.info(f"{icon} {row['本文']}")
                 
                 st.write("")
-                st.write("▼ 関連する投稿一覧（直近30件）")
+                st.write("▼ 関連する投稿一覧（最新順・全件スクロール表示）")
+                # 👈 .tail(30) を撤廃し、最新順に並び替えて全件表示
+                df_topic_sorted = df_topic_view.sort_values(by="投稿日時", ascending=False)
                 st.dataframe(
-                    df_topic_view[["表示日時", "本文", "判定"]].tail(30),
+                    df_topic_sorted[["表示日時", "本文", "判定"]],
                     column_config={"本文": st.column_config.TextColumn("本文", width="large")},
                     use_container_width=True,
                     hide_index=True
@@ -229,27 +229,31 @@ if os.path.exists(CSV_FILE):
             sub_tab1, sub_tab2, sub_tab3 = st.tabs(["🟢 ポジティブな投稿", "🔴 ネガティブな投稿", "⚪ 全ての投稿"])
             
             with sub_tab1:
-                df_pos = df_filtered[df_filtered["判定"] == "ポジティブ"]
+                df_pos = df_filtered[df_filtered["判定"] == "ポジティブ"].sort_values(by="投稿日時", ascending=False)
                 st.write(f"✨ ポジティブ件数: {len(df_pos)} 件")
+                # 👈 .tail(50) を撤廃して全件表示
                 st.dataframe(
-                    df_pos[["表示日時", "本文"]].tail(50),
+                    df_pos[["表示日時", "本文"]],
                     column_config={"本文": st.column_config.TextColumn("本文", width="large")},
                     use_container_width=True,
                     hide_index=True
                 )
             with sub_tab2:
-                df_neg = df_filtered[df_filtered["判定"] == "ネガティブ"]
+                df_neg = df_filtered[df_filtered["判定"] == "ネガティブ"].sort_values(by="投稿日時", ascending=False)
                 st.write(f"💥 ネガティブ件数: {len(df_neg)} 件")
+                # 👈 .tail(50) を撤廃して全件表示
                 st.dataframe(
-                    df_neg[["表示日時", "本文"]].tail(50),
+                    df_neg[["表示日時", "本文"]],
                     column_config={"本文": st.column_config.TextColumn("本文", width="large")},
                     use_container_width=True,
                     hide_index=True
                 )
             with sub_tab3:
-                st.write(f"📝 総投稿数: {len(df_filtered)} 件")
+                df_all_sorted = df_filtered.sort_values(by="投稿日時", ascending=False)
+                st.write(f"📝 総投稿数: {len(df_all_sorted)} 件")
+                # 👈 .tail(50) を撤廃して全件表示
                 st.dataframe(
-                    df_filtered[["表示日時", "本文", "判定"]].tail(50),
+                    df_all_sorted[["表示日時", "本文", "判定"]],
                     column_config={"本文": st.column_config.TextColumn("本文", width="large")},
                     use_container_width=True,
                     hide_index=True
