@@ -2,18 +2,15 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
-
-# グラフの日本語文字化けを防ぐプラグイン
 import japanize_matplotlib
 
 st.set_page_config(
-    page_title="電気事業者 SNS分析ボード", # ブラウザのタブ名
-    page_icon="⚡", # タブのアイコン
+    page_title="電気事業者 SNS分析ボード",
+    page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="expanded" # サイドバーを開いておく
+    initial_sidebar_state="expanded"
 )
 
-# CSSを直接埋め込んで、ヘッダー（GitHubマーク）を物理的に消滅させる
 st.markdown("""
     <style>
     div[data-testid="stToolbar"] {
@@ -30,11 +27,9 @@ st.title("⚡ 電気事業者 Xトレンド分析システム")
 
 CSV_FILE = "electricity_posts_data.csv"
 
-# ─── ポジ・ネガ別自動ランキング用キーワード群 ───
 NEG_TREND_WORDS = ["高い", "値上げ", "電気代", "停電", "不満", "外資", "提携", "まずい", "高騰", "リスク", "負担", "最悪", "不便", "エラー", "繋がらない", "解約", "料金", "乗っ取り", "ボイコット", "高すぎ"]
 POS_TREND_WORDS = ["安い", "お得", "便利", "助かる", "おすすめ", "オススメ", "満足", "ポイント", "キャンペーン", "節約", "キャッシュバック", "親切", "安心", "乗り換え", "招待コード", "最適"]
 
-# クロス集計用のトピック定義
 TOPIC_KEYWORDS = {
     "価格・料金プラン": ["高い", "安い", "値上げ", "値下げ", "料金", "電気代", "高騰", "請求", "節電", "家計", "燃料費"],
     "サービス・操作性": ["便利", "不便", "アプリ", "サイト", "マイページ", "ログイン", "手続き", "対応", "電話", "繋がらない", "ポイント", "契約", "解約"],
@@ -55,33 +50,73 @@ def assign_topics(text):
     return matched_topics if matched_topics else ["その他"]
 
 def get_top_words(posts, word_list, top_n=5):
-    """投稿文の中からキーワードの出現数をカウントして上位を返す関数"""
     counts = {}
     for kw in word_list:
         counts[kw] = posts.str.contains(kw, case=False, na=False).sum()
-    # 件数が多い順に並び替え、1件以上ヒットしたものだけを抽出
     sorted_words = sorted(counts.items(), key=lambda x: x[1], reverse=True)
     return [item for item in sorted_words if item[1] > 0][:top_n]
 
 if os.path.exists(CSV_FILE):
     df = pd.read_csv(CSV_FILE)
     
+    df["収集日時"] = pd.to_datetime(df["収集日時"])
+    if "投稿日時" in df.columns:
+        df["投稿日時"] = pd.to_datetime(df["投稿日時"])
+        df["投稿日時"] = df["投稿日時"].fillna(df["収集日時"])
+    else:
+        df["投稿日時"] = df["収集日時"]
+    
     st.sidebar.header("📊 分析条件設定")
     company = st.sidebar.selectbox("分析対象の事業者", ["東京電力", "関西電力", "中部電力", "九州電力", "リボンエナジー", "オクトパスエナジー", "looopでんき"])
+    
+    # 期間の指定方法を選択するメニュー
+    period_type = st.sidebar.radio(
+        "期間の指定方法", 
+        ["直近7日間（デフォルト）", "特定の日を指定", "特定の期間（週など）を範囲指定", "特定の月を指定", "全期間"], 
+        index=0
+    )
+    
     df_filtered = df[df["事業者"] == company].copy()
     
-    # トピック割り当てと重複エラー対策(reset_index)
+    now = pd.Timestamp.now()
+    
+    # 選択された指定方法に応じてフィルター処理を切り替え
+    if period_type == "直近7日間（デフォルト）":
+        df_filtered = df_filtered[df_filtered["投稿日時"] >= now - pd.Timedelta(days=7)]
+        
+    elif period_type == "特定の日を指定":
+        selected_date = st.sidebar.date_input("日付を選択", now.date())
+        df_filtered = df_filtered[df_filtered["投稿日時"].dt.date == selected_date]
+        
+    elif period_type == "特定の期間（週など）を範囲指定":
+        selected_range = st.sidebar.date_input(
+            "開始日と終了日を選択（同日選択で1週間などの調整可）", 
+            [now.date() - pd.Timedelta(days=7), now.date()]
+        )
+        if len(selected_range) == 2:
+            start_date, end_date = selected_range
+            df_filtered = df_filtered[
+                (df_filtered["投稿日時"].dt.date >= start_date) & 
+                (df_filtered["投稿日時"].dt.date <= end_date)
+            ]
+            
+    elif period_type == "特定の月を指定":
+        df["_year_month"] = df["投稿日時"].dt.strftime("%Y-%m")
+        unique_months = sorted(df["_year_month"].unique(), reverse=True)
+        if unique_months:
+            selected_month = st.sidebar.selectbox("月を選択", unique_months)
+            df_filtered = df_filtered[df_filtered["投稿日時"].dt.strftime("%Y-%m") == selected_month]
+        else:
+            st.sidebar.info("選択可能な月がありません")
+
+    df_filtered["表示日時"] = df_filtered["投稿日時"].dt.strftime("%Y-%m-%d %H:%M")
+    
     df_filtered['_topics'] = df_filtered['本文'].apply(assign_topics)
     df_exploded = df_filtered.explode('_topics').reset_index(drop=True)
 
     main_tab, raw_tab = st.tabs(["📈 高度トレンド分析（クロス集計）", "📝 感情別 投稿一覧"])
     
-    # ==========================================
-    # タブ1：高度トレンド分析
-    # ==========================================
     with main_tab:
-        
-        # ─── 【ここが新機能】画面の最上部にポジ・ネガごとの上位ワードを表示 ───
         st.markdown(f"### 📊 {company} の感情別フォアグラウンド・キーワード（全体トレンド）")
         st.caption("ポジティブ／ネガティブな投稿のそれぞれで、今どんな言葉が多く使われているかのトップ5です")
         
@@ -94,7 +129,6 @@ if os.path.exists(CSV_FILE):
             if top_pos:
                 words_p, counts_p = zip(*top_pos)
                 fig_p, ax_p = plt.subplots(figsize=(6, 2))
-                # 横棒グラフを綺麗に描画（下から上への並びを逆転させてランキング順にする）
                 ax_p.barh(words_p[::-1], counts_p[::-1], color='#99ff99')
                 ax_p.set_title("🟢 ポジティブ投稿の頻出ワード TOP5", fontsize=10, color="green")
                 ax_p.set_xlabel("言及件数 (件)", fontsize=8)
@@ -118,10 +152,9 @@ if os.path.exists(CSV_FILE):
             else:
                 st.info("🔴 ネガティブな特有ワードはまだ検出されていません。")
                 
-        st.markdown("---") # 区切り線
+        st.markdown("---")
         
-        # ─── 既存のトピッククロス分析・ドリルダウン ───
-        st.subheader("🎯 話飯（トピック）× 感情のクロス分析")
+        st.subheader("🎯 話題（トピック）× 感情のクロス分析")
         col1, col2 = st.columns([3, 2])
         
         with col1:
@@ -178,7 +211,7 @@ if os.path.exists(CSV_FILE):
                 st.write("")
                 st.write("▼ 関連する投稿一覧（直近30件）")
                 st.dataframe(
-                    df_topic_view[["収集日時", "本文", "判定"]].tail(30),
+                    df_topic_view[["表示日時", "本文", "判定"]].tail(30),
                     column_config={"本文": st.column_config.TextColumn("本文", width="large")},
                     use_container_width=True,
                     hide_index=True
@@ -199,7 +232,7 @@ if os.path.exists(CSV_FILE):
                 df_pos = df_filtered[df_filtered["判定"] == "ポジティブ"]
                 st.write(f"✨ ポジティブ件数: {len(df_pos)} 件")
                 st.dataframe(
-                    df_pos[["収集日時", "本文"]].tail(50),
+                    df_pos[["表示日時", "本文"]].tail(50),
                     column_config={"本文": st.column_config.TextColumn("本文", width="large")},
                     use_container_width=True,
                     hide_index=True
@@ -208,7 +241,7 @@ if os.path.exists(CSV_FILE):
                 df_neg = df_filtered[df_filtered["判定"] == "ネガティブ"]
                 st.write(f"💥 ネガティブ件数: {len(df_neg)} 件")
                 st.dataframe(
-                    df_neg[["収集日時", "本文"]].tail(50),
+                    df_neg[["表示日時", "本文"]].tail(50),
                     column_config={"本文": st.column_config.TextColumn("本文", width="large")},
                     use_container_width=True,
                     hide_index=True
@@ -216,7 +249,7 @@ if os.path.exists(CSV_FILE):
             with sub_tab3:
                 st.write(f"📝 総投稿数: {len(df_filtered)} 件")
                 st.dataframe(
-                    df_filtered[["収集日時", "本文", "判定"]].tail(50),
+                    df_filtered[["表示日時", "本文", "判定"]].tail(50),
                     column_config={"本文": st.column_config.TextColumn("本文", width="large")},
                     use_container_width=True,
                     hide_index=True

@@ -2,12 +2,15 @@ name: 1-Hour SNS Scraping with Playwright
 
 on:
   schedule:
-    - cron: '0 * * * *'  # 1時間おきに自動実行
-  workflow_dispatch:      # 管理画面から手動で即時実行できるボタン
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
-    runs-on: ubuntu-latest  # GitHubが貸してくれる無料のLinuxマシン
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -32,6 +35,6 @@ jobs:
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add electricity_posts_data.csv scraping_log.txt
+        git add electricity_posts_data.csv
         git commit -m "Auto-update data" || exit 0
         git push
