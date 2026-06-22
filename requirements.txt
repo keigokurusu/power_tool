@@ -8,3 +8,5 @@ playwright
 streamlit
 matplotlib
 japanize-matplotlib
+torch
+torchvision
