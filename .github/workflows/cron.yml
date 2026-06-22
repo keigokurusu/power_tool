@@ -2,7 +2,7 @@ name: 1-Hour SNS Scraping with Playwright
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '23 * * * *'
   workflow_dispatch:
 
 permissions:
