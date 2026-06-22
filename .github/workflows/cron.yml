@@ -1,0 +1,37 @@
+name: 1-Hour SNS Scraping with Playwright
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # 1時間おきに自動実行
+  workflow_dispatch:      # 管理画面から手動で即時実行できるボタン
+
+jobs:
+  build:
+    runs-on: ubuntu-latest  # GitHubが貸してくれる無料のLinuxマシン
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+
+    - name: Install Playwright Browsers
+      run: |
+        playwright install chromium --with-deps
+
+    - name: Run script
+      run: python collector.py
+
+    - name: Commit and Push changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add electricity_posts_data.csv
+        git commit -m "Auto-update data" || exit 0
+        git push
