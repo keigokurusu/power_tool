@@ -19,7 +19,6 @@ KEYWORDS_MAPPING = {
 
 CSV_FILE = "electricity_posts_data.csv"
 
-# 感情分析モデルの準備
 analyzer = pipeline("sentiment-analysis", model="cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual")
 
 def clean_text(text):
@@ -46,7 +45,6 @@ def fetch_posts(keyword):
         soup = BeautifulSoup(html, 'html.parser')
         search_term = keyword[:2]
         
-        # 1. 【確実性重視】まずは網を広げて、ツイートに関係しそうなブロックをガバッと拾う
         elements = soup.find_all(["p", "div", "li"])
         for elem in elements:
             class_str = "".join(elem.get("class", []))
@@ -58,16 +56,11 @@ def fetch_posts(keyword):
                         continue
                     raw_posts.append(text)
                     
-        # ─── 【新機能】親タグ・子タグの巻き込み重複を100%倒す仕分けロジック ───
-        # 重複を無くすため一度一意にする
         raw_posts = list(set(raw_posts))
-        # 文章が「短い順」にソート（＝本文のみの綺麗なデータが先頭に来る）
         raw_posts.sort(key=len)
         
         final_posts = []
         for p in raw_posts:
-            # 既に採用した短い本文が、今見ている長い文章 p の中に含まれているか？
-            # 含まれているなら、p は親枠のノイズなので「偽物」として無視する
             is_duplicate_parent = False
             for adopted in final_posts:
                 if adopted in p:
@@ -75,7 +68,6 @@ def fetch_posts(keyword):
                     break
             
             if not is_duplicate_parent:
-                # 「メニューを開く」などの明らかなシステム文字が入っている巨大な親枠は単体でも弾く
                 if "メニューを開く" in p:
                     continue
                 final_posts.append(p)
@@ -87,7 +79,13 @@ def fetch_posts(keyword):
         print(f"     [エラー詳細]: {e}")
         return []
 
-# メメイン処理
+def get_top_words(posts, word_list, top_n=5):
+    counts = {}
+    for kw in word_list:
+        counts[kw] = posts.str.contains(kw, case=False, na=False).sum()
+    sorted_words = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+    return [item for item in sorted_words if item[1] > 0][:top_n]
+
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 all_new_posts = []
 

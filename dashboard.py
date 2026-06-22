@@ -6,13 +6,31 @@ import os
 # グラフの日本語文字化けを防ぐプラグイン
 import japanize_matplotlib
 
-st.set_page_config(layout="wide")
-st.title("⚡ 電気事業者 SNS高度トレンド分析システム")
+st.set_page_config(
+    page_title="電気事業者 SNS分析ボード", # ブラウザのタブ名
+    page_icon="⚡", # タブのアイコン
+    layout="wide",
+    initial_sidebar_state="expanded" # サイドバーを開いておく
+)
+
+# CSSを直接埋め込んで、ヘッダー（GitHubマーク）を物理的に消滅させる
+st.markdown("""
+    <style>
+    div[data-testid="stToolbar"] {
+        visibility: hidden;
+    }
+    header {
+        visibility: visible !important;
+        background: rgba(255, 255, 255, 0);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+st.title("⚡ 電気事業者 Xトレンド分析システム")
 
 CSV_FILE = "electricity_posts_data.csv"
 
-# ─── 【重要】ポジ・ネガ別の自動ランキング用キーワード群 ───
-# 実際のSNSデータ（外資、提携、招待コード等）を網羅できるように拡充しました
+# ─── ポジ・ネガ別自動ランキング用キーワード群 ───
 NEG_TREND_WORDS = ["高い", "値上げ", "電気代", "停電", "不満", "外資", "提携", "まずい", "高騰", "リスク", "負担", "最悪", "不便", "エラー", "繋がらない", "解約", "料金", "乗っ取り", "ボイコット", "高すぎ"]
 POS_TREND_WORDS = ["安い", "お得", "便利", "助かる", "おすすめ", "オススメ", "満足", "ポイント", "キャンペーン", "節約", "キャッシュバック", "親切", "安心", "乗り換え", "招待コード", "最適"]
 
@@ -103,7 +121,7 @@ if os.path.exists(CSV_FILE):
         st.markdown("---") # 区切り線
         
         # ─── 既存のトピッククロス分析・ドリルダウン ───
-        st.subheader("🎯 話題（トピック）× 感情のクロス分析")
+        st.subheader("🎯 話飯（トピック）× 感情のクロス分析")
         col1, col2 = st.columns([3, 2])
         
         with col1:
@@ -159,7 +177,12 @@ if os.path.exists(CSV_FILE):
                 
                 st.write("")
                 st.write("▼ 関連する投稿一覧（直近30件）")
-                st.dataframe(df_topic_view[["収集日時", "本文", "判定"]].tail(30), use_container_width=True)
+                st.dataframe(
+                    df_topic_view[["収集日時", "本文", "判定"]].tail(30),
+                    column_config={"本文": st.column_config.TextColumn("本文", width="large")},
+                    use_container_width=True,
+                    hide_index=True
+                )
             else:
                 st.info("該当するデータがまだありません。")
             
@@ -175,14 +198,29 @@ if os.path.exists(CSV_FILE):
             with sub_tab1:
                 df_pos = df_filtered[df_filtered["判定"] == "ポジティブ"]
                 st.write(f"✨ ポジティブ件数: {len(df_pos)} 件")
-                st.dataframe(df_pos[["収集日時", "本文"]].tail(50), use_container_width=True)
+                st.dataframe(
+                    df_pos[["収集日時", "本文"]].tail(50),
+                    column_config={"本文": st.column_config.TextColumn("本文", width="large")},
+                    use_container_width=True,
+                    hide_index=True
+                )
             with sub_tab2:
                 df_neg = df_filtered[df_filtered["判定"] == "ネガティブ"]
                 st.write(f"💥 ネガティブ件数: {len(df_neg)} 件")
-                st.dataframe(df_neg[["収集日時", "本文"]].tail(50), use_container_width=True)
+                st.dataframe(
+                    df_neg[["収集日時", "本文"]].tail(50),
+                    column_config={"本文": st.column_config.TextColumn("本文", width="large")},
+                    use_container_width=True,
+                    hide_index=True
+                )
             with sub_tab3:
                 st.write(f"📝 総投稿数: {len(df_filtered)} 件")
-                st.dataframe(df_filtered[["収集日時", "本文", "判定"]].tail(50), use_container_width=True)
+                st.dataframe(
+                    df_filtered[["収集日時", "本文", "判定"]].tail(50),
+                    column_config={"本文": st.column_config.TextColumn("本文", width="large")},
+                    use_container_width=True,
+                    hide_index=True
+                )
                 
         with col4:
             st.write("")
