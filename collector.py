@@ -1,7 +1,6 @@
 import os
 import urllib.parse
 import pandas as pd
-# timezone を新しくインポート
 from datetime import datetime, timedelta, timezone
 from transformers import pipeline
 from playwright.sync_api import sync_playwright
@@ -20,8 +19,6 @@ KEYWORDS_MAPPING = {
 }
 
 CSV_FILE = "electricity_posts_data.csv"
-
-# 日本時間（JST）のタイムゾーンを設定
 JST = timezone(timedelta(hours=9))
 
 analyzer = pipeline("sentiment-analysis", model="cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual")
@@ -34,9 +31,18 @@ def clean_text(text):
     return text.strip()
 
 def parse_tweet_time(time_text):
-    # 👈 常に日本時間で現在時刻を計算する（tzinfoはCSV保存用に剥ぎ取る）
     now = datetime.now(JST).replace(tzinfo=None)
+    if not time_text:
+        return now
+        
     try:
+        if "T" in time_text and ("+" in time_text or "Z" in time_text):
+            dt_str = time_text.split("+")[0].split("Z")[0]
+            return datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%S")
+            
+        if time_text.isdigit() and len(time_text) >= 10:
+            return datetime.fromtimestamp(int(time_text[:10]))
+
         if "秒" in time_text:
             num = int(re.search(r'(\d+)', time_text).group(1))
             return now - timedelta(seconds=num)
@@ -74,8 +80,7 @@ def fetch_posts(keyword):
             page = browser.new_page()
             page.goto(url)
             
-            random_wait = random.randint(3000, 6000)
-            page.wait_for_timeout(random_wait)
+            page.wait_for_timeout(random.randint(3000, 6000))
             
             html = page.content()
             browser.close()
@@ -92,18 +97,15 @@ def fetch_posts(keyword):
                     if "検索" in text and "ID" in text:
                         continue
                     
+                    # ─── 【大修正】クラス名に "Tweet_time" が含まれる要素をダイレクトに狙い撃ち ───
                     time_text = ""
                     current = elem
-                    for _ in range(4):
-                        if not current:
-                            break
-                        time_tag = current.find("time")
-                        if time_tag:
-                            time_text = clean_text(time_tag.get_text())
-                            break
-                        time_elem = current.find(lambda tag: tag.name in ["span", "div"] and any(k in " ".join(tag.get("class", [])) for k in ["time", "Time"]))
+                    while current:
+                        # 親に遡りながら、そのツイート枠の中に class名「Tweet_time」を持つ要素があるか探す
+                        time_elem = current.find(lambda tag: tag.name == "time" or any("Tweet_time" in c for c in tag.get("class", [])))
                         if time_elem:
-                            time_text = clean_text(time_elem.get_text())
+                            dt_attr = time_elem.get("datetime")
+                            time_text = clean_text(dt_attr) if dt_attr else clean_text(time_elem.get_text())
                             break
                         current = current.parent
                     
@@ -134,7 +136,6 @@ def fetch_posts(keyword):
         print(f"     [エラー詳細]: {e}")
         return []
 
-# 👈 収集日時も日本時間に固定
 current_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
 all_new_posts = []
 
