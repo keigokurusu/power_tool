@@ -39,7 +39,6 @@ def parse_tweet_time(time_text):
         if "T" in time_text and ("+" in time_text or "Z" in time_text):
             dt_str = time_text.split("+")[0].split("Z")[0]
             return datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%S")
-            
         if time_text.isdigit() and len(time_text) >= 10:
             return datetime.fromtimestamp(int(time_text[:10]))
 
@@ -52,19 +51,32 @@ def parse_tweet_time(time_text):
         elif "時間" in time_text:
             num = int(re.search(r'(\d+)', time_text).group(1))
             return now - timedelta(hours=num)
-        elif "今日" in time_text:
-            time_str = re.search(r'(\d{1,2}:\d{2})', time_text).group(1)
-            return datetime.strptime(f"{now.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M")
-        else:
+            
+        if "昨日" in time_text:
+            time_match = re.search(r'(\d{1,2}:\d{2})', time_text)
+            if time_match:
+                time_str = time_match.group(1)
+                yesterday = now - timedelta(days=1)
+                return datetime.strptime(f"{yesterday.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M")
+
+        time_match = re.search(r'(\d{1,2}:\d{2})', time_text)
+        month_day_match = re.search(r'(\d{1,2})月(\d{1,2})日', time_text)
+
+        if time_match and not month_day_match:
+            time_str = time_match.group(1)
+            parsed_dt = datetime.strptime(f"{now.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M")
+            if parsed_dt > now:
+                parsed_dt -= timedelta(days=1)
+            return parsed_dt
+
+        if month_day_match:
             year_match = re.search(r'(\d{4})年', time_text)
             year = year_match.group(1) if year_match else str(now.year)
-            month_day_match = re.search(r'(\d{1,2})月(\d{1,2})日', time_text)
-            if month_day_match:
-                month = month_day_match.group(1)
-                day = month_day_match.group(2)
-                time_match = re.search(r'(\d{1,2}:\d{2})', time_text)
-                time_str = time_match.group(1) if time_match else "00:00"
-                return datetime.strptime(f"{year}-{month}-{day} {time_str}", "%Y-%m-%d %H:%M")
+            month = month_day_match.group(1)
+            day = month_day_match.group(2)
+            time_str = time_match.group(1) if time_match else "00:00"
+            return datetime.strptime(f"{year}-{month}-{day} {time_str}", "%Y-%m-%d %H:%M")
+
     except:
         pass
     return now
@@ -80,7 +92,25 @@ def fetch_posts(keyword):
             page = browser.new_page()
             page.goto(url)
             
-            page.wait_for_timeout(random.randint(3000, 6000))
+            page.wait_for_timeout(random.randint(2000, 4000))
+            
+            # ─── 【ガチ強化】5回スクロール ＆「もっと見る」ボタン自動連打 ───
+            scroll_count = 5
+            for i in range(scroll_count):
+                # まず一番下までスクロールしてボタンを画面に出す
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(random.randint(1000, 2000))
+                
+                # 画面上に「もっと見る」という文字のボタン・リンクがあれば自動クリック
+                try:
+                    more_btn = page.get_by_text("もっと見る", exact=False)
+                    if more_btn.is_visible():
+                        more_btn.click()
+                        # クリックした後の追加読み込みを少し長めに待つ（BAN対策）
+                        page.wait_for_timeout(random.randint(2000, 3500))
+                except:
+                    # ボタンがない、または読み込み中などでクリックできなくてもエラーにせず次へ進む
+                    pass
             
             html = page.content()
             browser.close()
@@ -96,12 +126,14 @@ def fetch_posts(keyword):
                 if 15 < len(text) < 280 and keyword.lower() in text.lower():
                     if "検索" in text and "ID" in text:
                         continue
+                    if any(w in text for w in ["その他の投稿", "もっと見る", "メニューを開く", "公式アカウント", "関連ワード", "元のツイート"]):
+                        continue
                     
-                    # ─── 【大修正】クラス名に "Tweet_time" が含まれる要素をダイレクトに狙い撃ち ───
                     time_text = ""
                     current = elem
+                    tweet_box = None
+                    
                     while current:
-                        # 親に遡りながら、そのツイート枠の中に class名「Tweet_time」を持つ要素があるか探す
                         time_elem = current.find(lambda tag: tag.name == "time" or any("Tweet_time" in c for c in tag.get("class", [])))
                         if time_elem:
                             dt_attr = time_elem.get("datetime")
@@ -124,8 +156,6 @@ def fetch_posts(keyword):
                     break
             
             if not is_duplicate_parent:
-                if "メニューを開く" in t:
-                    continue
                 parsed_time = parse_tweet_time(raw_tweets[t]).strftime("%Y-%m-%d %H:%M:%S")
                 final_tweets.append((t, parsed_time))
                 
