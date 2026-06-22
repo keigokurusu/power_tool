@@ -7,6 +7,7 @@ from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import re
 import random
+import glob  # 👈 過去の全ファイルを検索するために新しく追加
 
 KEYWORDS_MAPPING = {
     "東京電力": ["東京電力", "東電", "TEPCO", "テプコ"],
@@ -18,8 +19,11 @@ KEYWORDS_MAPPING = {
     "looopでんき": ["looopでんき", "ループ電気", "ループでんき", "loop電気"]
 }
 
-CSV_FILE = "electricity_posts_data.csv"
 JST = timezone(timedelta(hours=9))
+
+# 👈 【修正】実行時の日本時間ベースでファイル名を毎月自動決定（例: electricity_posts_2026_06.csv）
+current_month_str = datetime.now(JST).strftime("%Y_%m")
+CSV_FILE = f"electricity_posts_{current_month_str}.csv"
 
 analyzer = pipeline("sentiment-analysis", model="cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual")
 
@@ -97,19 +101,15 @@ def fetch_posts(keyword):
             # ─── 【ガチ強化】5回スクロール ＆「もっと見る」ボタン自動連打 ───
             scroll_count = 5
             for i in range(scroll_count):
-                # まず一番下までスクロールしてボタンを画面に出す
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 page.wait_for_timeout(random.randint(1000, 2000))
                 
-                # 画面上に「もっと見る」という文字のボタン・リンクがあれば自動クリック
                 try:
                     more_btn = page.get_by_text("もっと見る", exact=False)
                     if more_btn.is_visible():
                         more_btn.click()
-                        # クリックした後の追加読み込みを少し長めに待つ（BAN対策）
                         page.wait_for_timeout(random.randint(2000, 3500))
                 except:
-                    # ボタンがない、または読み込み中などでクリックできなくてもエラーにせず次へ進む
                     pass
             
             html = page.content()
@@ -131,7 +131,6 @@ def fetch_posts(keyword):
                     
                     time_text = ""
                     current = elem
-                    tweet_box = None
                     
                     while current:
                         time_elem = current.find(lambda tag: tag.name == "time" or any("Tweet_time" in c for c in tag.get("class", [])))
@@ -167,6 +166,20 @@ def fetch_posts(keyword):
         return []
 
 current_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+
+# 👈 【新機能】月を跨いでも同じ投稿を二重回収しないよう、全CSVファイルから既知の投稿を事前にロード
+csv_files = glob.glob("electricity_posts_*.csv")
+known_posts = set()
+if csv_files:
+    for f in csv_files:
+        try:
+            old_df = pd.read_csv(f)
+            if not old_df.empty and "事業者" in old_df.columns and "本文" in old_df.columns:
+                for idx, row in old_df.iterrows():
+                    known_posts.add((str(row["事業者"]), clean_text(str(row["本文"]))))
+        except:
+            pass
+
 all_new_posts = []
 
 for company, keywords in KEYWORDS_MAPPING.items():
@@ -175,6 +188,10 @@ for company, keywords in KEYWORDS_MAPPING.items():
     for keyword in keywords:
         tweets = fetch_posts(keyword)
         for post, post_time in tweets:
+            # 👈 過去のすべてのファイルと照合して重複をスキップ
+            if (company, clean_text(post)) in known_posts:
+                continue
+                
             try:
                 res = analyzer(post)[0]
                 label = res['label'].lower()
@@ -199,6 +216,7 @@ if all_new_posts:
     df_new = pd.DataFrame(all_new_posts)
     df_new["本文"] = df_new["本文"].apply(clean_text)
     
+    # 👈 今月用のCSVが存在すれば合体、なければ今月初のファイルとして新規作成
     if os.path.exists(CSV_FILE):
         df_old = pd.read_csv(CSV_FILE)
         df_old["本文"] = df_old["本文"].apply(clean_text)
@@ -207,6 +225,6 @@ if all_new_posts:
         df_combined = df_new
         
     df_combined.to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
-    print(f"✨ 完璧にクリーンなデータを保存しました。総蓄積件数: {len(df_combined)} 件")
+    print(f"✨ 今月のデータファイル【{CSV_FILE}】に保存しました。今月の総蓄積件数: {len(df_combined)} 件")
 else:
     print("❌ 新しいポストは見つかりませんでした。")
