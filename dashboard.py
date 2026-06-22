@@ -21,6 +21,23 @@ st.markdown("""
         visibility: visible !important;
         background: rgba(255, 255, 255, 0);
     }
+    footer {
+        visibility: hidden;
+        display: none !important;
+    }
+    div[data-testid="stFooter"] {
+        display: none !important;
+    }
+    .profileContainer,
+    #profileContainer,
+    [id*="profileContainer"],
+    [class*="profileContainer"],
+    iframe[title*="profileContainer"] {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
