@@ -24,7 +24,7 @@ JST = timezone(timedelta(hours=9))
 current_month_str = datetime.now(JST).strftime("%Y_%m")
 CSV_FILE = f"electricity_posts_{current_month_str}.csv"
 
-analyzer = pipeline("sentiment-analysis", model="cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual")
+# 👈 【大修正】ここに置いてあった analyzer = pipeline(...) を消去し、一番下の防壁内へ引っ越しました。
 
 def clean_text(text):
     if not text:
@@ -164,9 +164,12 @@ def fetch_posts(keyword):
         return []
 
 
-# ─── 【大修正】ここから下の実行処理を「防壁」の中に格納 ───
-# これにより、GitHub Actionsや手元で直接実行した時だけ動き、Streamlitに読み込まれた時は完全に黙ります。
+# ─── 【本番作動ブロック】 ───
 if __name__ == "__main__":
+    # 👈 【引っ越し完了】直接実行された時だけ、AIモデルをロードする
+    print("🤗 感情分析AIモデルを初期化しています...")
+    analyzer = pipeline("sentiment-analysis", model="cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual")
+
     current_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
 
     csv_files = glob.glob("electricity_posts_*.csv")
