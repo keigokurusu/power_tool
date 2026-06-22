@@ -1,7 +1,8 @@
 import os
 import urllib.parse
 import pandas as pd
-from datetime import datetime, timedelta
+# timezone を新しくインポート
+from datetime import datetime, timedelta, timezone
 from transformers import pipeline
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
@@ -20,6 +21,9 @@ KEYWORDS_MAPPING = {
 
 CSV_FILE = "electricity_posts_data.csv"
 
+# 日本時間（JST）のタイムゾーンを設定
+JST = timezone(timedelta(hours=9))
+
 analyzer = pipeline("sentiment-analysis", model="cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual")
 
 def clean_text(text):
@@ -30,7 +34,8 @@ def clean_text(text):
     return text.strip()
 
 def parse_tweet_time(time_text):
-    now = datetime.now()
+    # 👈 常に日本時間で現在時刻を計算する（tzinfoはCSV保存用に剥ぎ取る）
+    now = datetime.now(JST).replace(tzinfo=None)
     try:
         if "秒" in time_text:
             num = int(re.search(r'(\d+)', time_text).group(1))
@@ -69,7 +74,6 @@ def fetch_posts(keyword):
             page = browser.new_page()
             page.goto(url)
             
-            # 3〜6秒のランダム待機（BAN対策）
             random_wait = random.randint(3000, 6000)
             page.wait_for_timeout(random_wait)
             
@@ -78,7 +82,6 @@ def fetch_posts(keyword):
             
         soup = BeautifulSoup(html, 'html.parser')
         
-        # ─── 元の超強力な全スキャン方式に巻き戻し ───
         elements = soup.find_all(["p", "div", "li"])
         for elem in elements:
             class_str = " ".join(elem.get("class", []))
@@ -89,10 +92,9 @@ def fetch_posts(keyword):
                     if "検索" in text and "ID" in text:
                         continue
                     
-                    # 本文が見つかったら、親要素に遡って同じツイート内の時間（timeタグ等）を探す
                     time_text = ""
                     current = elem
-                    for _ in range(4): # 4階層上まで探索
+                    for _ in range(4):
                         if not current:
                             break
                         time_tag = current.find("time")
@@ -106,7 +108,7 @@ def fetch_posts(keyword):
                         current = current.parent
                     
                     if not time_text:
-                        time_text = "今日 00:00" # 防御策
+                        time_text = "今日 00:00"
                         
                     raw_tweets[text] = time_text
                         
@@ -132,7 +134,8 @@ def fetch_posts(keyword):
         print(f"     [エラー詳細]: {e}")
         return []
 
-current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+# 👈 収集日時も日本時間に固定
+current_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
 all_new_posts = []
 
 for company, keywords in KEYWORDS_MAPPING.items():
