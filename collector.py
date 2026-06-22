@@ -6,6 +6,7 @@ from transformers import pipeline
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import re
+import random
 
 KEYWORDS_MAPPING = {
     "東京電力": ["東京電力", "東電", "TEPCO", "テプコ"],
@@ -67,26 +68,47 @@ def fetch_posts(keyword):
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
             page.goto(url)
-            page.wait_for_timeout(3000)
+            
+            # 3〜6秒のランダム待機（BAN対策）
+            random_wait = random.randint(3000, 6000)
+            page.wait_for_timeout(random_wait)
+            
             html = page.content()
             browser.close()
             
         soup = BeautifulSoup(html, 'html.parser')
         
-        for item in soup.find_all(["div", "li"]):
-            item_class = "".join(item.get("class", []))
-            if "Tweet_tweet" in item_class or "Tweet_listElement" in item_class:
-                body_elem = item.find(["p", "div"], class_=lambda c: c and any(k in c for k in ["body", "text", "Text"]))
-                time_elem = item.find(["time", "span", "div"], class_=lambda c: c and any(k in c for k in ["time", "Time"]))
+        # ─── 元の超強力な全スキャン方式に巻き戻し ───
+        elements = soup.find_all(["p", "div", "li"])
+        for elem in elements:
+            class_str = " ".join(elem.get("class", []))
+            if any(k in class_str for k in ["Tweet", "text", "Text", "body", "Content"]):
+                text = clean_text(elem.get_text())
                 
-                if body_elem and time_elem:
-                    text = clean_text(body_elem.get_text())
-                    time_text = clean_text(time_elem.get_text())
+                if 15 < len(text) < 280 and keyword.lower() in text.lower():
+                    if "検索" in text and "ID" in text:
+                        continue
                     
-                    if 15 < len(text) < 280 and keyword.lower() in text.lower():
-                        if "検索" in text and "ID" in text:
-                            continue
-                        raw_tweets[text] = time_text
+                    # 本文が見つかったら、親要素に遡って同じツイート内の時間（timeタグ等）を探す
+                    time_text = ""
+                    current = elem
+                    for _ in range(4): # 4階層上まで探索
+                        if not current:
+                            break
+                        time_tag = current.find("time")
+                        if time_tag:
+                            time_text = clean_text(time_tag.get_text())
+                            break
+                        time_elem = current.find(lambda tag: tag.name in ["span", "div"] and any(k in " ".join(tag.get("class", [])) for k in ["time", "Time"]))
+                        if time_elem:
+                            time_text = clean_text(time_elem.get_text())
+                            break
+                        current = current.parent
+                    
+                    if not time_text:
+                        time_text = "今日 00:00" # 防御策
+                        
+                    raw_tweets[text] = time_text
                         
         sorted_texts = sorted(raw_tweets.keys(), key=len)
         final_tweets = []

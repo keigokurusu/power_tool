@@ -35,6 +35,6 @@ jobs:
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add electricity_posts_data.csv
+        git add -A
         git commit -m "Auto-update data" || exit 0
         git push
