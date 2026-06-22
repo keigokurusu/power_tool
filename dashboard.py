@@ -3,8 +3,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 
-# グラフの日本語文字化けを防ぐ設定
-plt.rcParams['font.family'] = 'MS Gothic'
+# グラフの日本語文字化けを防ぐプラグイン
+import japanize_matplotlib
 
 st.set_page_config(layout="wide")
 st.title("⚡ 電気事業者 SNS高度トレンド分析システム")

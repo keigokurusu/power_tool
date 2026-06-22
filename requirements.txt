@@ -7,3 +7,4 @@ sentencepiece
 playwright
 streamlit
 matplotlib
+japanize-matplotlib
