@@ -14,14 +14,12 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    div[data-testid="stToolbar"],
+    div[data-testid="stToolbar"] > div, 
     div[data-testid="stAppDeployButton"] {
-        visibility: hidden;
         display: none !important;
     }
     header[data-testid="stHeader"] {
-        visibility: visible !important;
-        background: transparent !important; /* 背景は透明にして存在感を消す */
+        background: transparent !important;
     }
     footer {
         visibility: hidden;
@@ -43,7 +41,11 @@ st.markdown("""
     div[data-testid="stSidebarCollapsedControl"] {
         visibility: visible !important;
         display: flex !important;
+        opacity: 1 !important;
         z-index: 999999 !important;
+    }
+    div[data-testid="stSidebarCollapsedControl"] button {
+        color: #31333F !important;
     }
     </style>
     """, unsafe_allow_html=True)
