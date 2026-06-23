@@ -14,38 +14,12 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    div[data-testid="stToolbar"] > div, 
-    div[data-testid="stAppDeployButton"] {
-        display: none !important;
-    }
-    header[data-testid="stHeader"] {
-        background: transparent !important;
-    }
-    footer {
-        visibility: hidden;
-        display: none !important;
-    }
-    div[data-testid="stFooter"] {
-        display: none !important;
-    }
+    div[data-testid="stManageAppButton"],
+    footer,
+    div[data-testid="stFooter"],
     .profileContainer,
-    #profileContainer,
-    [id*="profileContainer"],
-    [class*="profileContainer"],
-    iframe[title*="profileContainer"] {
+    [class*="profileContainer"] {
         display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-    }
-    div[data-testid="stSidebarCollapsedControl"] {
-        visibility: visible !important;
-        display: flex !important;
-        opacity: 1 !important;
-        z-index: 999999 !important;
-    }
-    div[data-testid="stSidebarCollapsedControl"] button {
-        color: #31333F !important;
     }
     </style>
     """, unsafe_allow_html=True)
