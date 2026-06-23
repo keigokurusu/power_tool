@@ -14,12 +14,14 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    div[data-testid="stToolbar"] {
+    div[data-testid="stToolbar"],
+    div[data-testid="stAppDeployButton"] {
         visibility: hidden;
+        display: none !important;
     }
-    header {
+    header[data-testid="stHeader"] {
         visibility: visible !important;
-        background: rgba(255, 255, 255, 0);
+        background: transparent !important; /* 背景は透明にして存在感を消す */
     }
     footer {
         visibility: hidden;
