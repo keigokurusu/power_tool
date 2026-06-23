@@ -14,6 +14,9 @@ st.set_page_config(
 
 st.markdown("""
     <style>
+    div[data-testid="stToolbarActions"], button[id="MainMenu"], div[data-testid="stMainMenu"] {
+        display: none !important;
+    }
     div[data-testid="stManageAppButton"],
     footer,
     div[data-testid="stFooter"],
