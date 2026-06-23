@@ -160,7 +160,7 @@ if csv_files:
                 
         st.markdown("---")
         
-        st.subheader("🎯 話動（トピック）× 感情のクロス分析")
+        st.subheader("🎯 話題（トピック）× 感情のクロス分析")
         col1, col2 = st.columns([3, 2])
         
         with col1:
