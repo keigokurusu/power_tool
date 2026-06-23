@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 import japanize_matplotlib
-import glob  # 👈 【追加】複数ファイルを一括探索するためのライブラリ
+import glob
 
 st.set_page_config(
     page_title="電気事業者 SNS分析ボード",
@@ -38,20 +38,26 @@ st.markdown("""
         opacity: 0 !important;
         pointer-events: none !important;
     }
+    div[data-testid="stSidebarCollapsedControl"] {
+        visibility: visible !important;
+        display: flex !important;
+        z-index: 999999 !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("⚡ 電気事業者 Xトレンド分析システム")
 
-# 👈 今までの単一ファイル指定を廃止し、"electricity_posts_*.csv" にマッチするファイルをすべて探す仕様に変更
 csv_files = glob.glob("electricity_posts_*.csv")
 
-NEG_TREND_WORDS = ["高い", "値上げ", "電気代", "停電", "不満", "外資", "提携", "まずい", "高騰", "リスク", "負担", "最悪", "不便", "エラー", "繋がらない", "解約", "料金", "乗っ取り", "ボイコット", "高すぎ"]
+NEG_TREND_WORDS = ["高い", "値上げ", "電気代", "停電", "不満", "外資", "提携", "まずい", "高騰", "リスク", "負担", "最悪", "不便", "エラー", "繋がらない", "解約", "料金", "請求", "乗っ取り", "ボイコット", "高すぎ"]
+
 POS_TREND_WORDS = ["安い", "お得", "便利", "助かる", "おすすめ", "オススメ", "満足", "ポイント", "キャンペーン", "節約", "キャッシュバック", "親切", "安心", "乗り換え", "招待コード", "最適"]
 
 TOPIC_KEYWORDS = {
     "価格・料金プラン": ["高い", "安い", "値上げ", "値下げ", "料金", "電気代", "高騰", "請求", "節電", "家計", "燃料費"],
     "サービス・操作性": ["便利", "不便", "アプリ", "サイト", "マイページ", "ログイン", "手続き", "対応", "電話", "繋がらない", "ポイント", "契約", "解約"],
+    "契約・切替": ["申し込み", "申込", "契約", "切り替え", "乗り換え", "開通", "開始", "解約"],
     "インフラ・停電リスク": ["停電", "復旧", "ついた", "消えた", "災害", "台風", "落雷", "送電", "発電", "原発", "火力"],
     "企業姿勢・ニュース": ["国有化", "株式", "外資", "提携", "買収", "株価", "経営", "投資", "ニュース", "不祥事", "カルテル"]
 }
@@ -75,9 +81,9 @@ def get_top_words(posts, word_list, top_n=5):
     sorted_words = sorted(counts.items(), key=lambda x: x[1], reverse=True)
     return [item for item in sorted_words if item[1] > 0][:top_n]
 
-# 👈 【修正】CSVファイルが1つでも見つかったら処理を開始
+# CSVファイルが1つでも見つかったら処理を開始
 if csv_files:
-    # 👈 見つかった月別のCSVファイルをすべて読み込んで、裏で縦に1つに自動結合します
+    # 見つかった月別のCSVファイルをすべて読み込んで、1つに結合
     df = pd.concat([pd.read_csv(f) for f in csv_files], ignore_index=True)
     
     df["収集日時"] = pd.to_datetime(df["収集日時"])

@@ -28,8 +28,7 @@ JST = timezone(timedelta(hours=9))
 
 current_month_str = datetime.now(JST).strftime("%Y_%m")
 CSV_FILE = f"electricity_posts_{current_month_str}.csv"
-
-# 👈 【大修正】ここに置いてあった analyzer = pipeline(...) を消去し、一番下の防壁内へ引っ越しました。
+。
 
 def clean_text(text):
     if not text:
