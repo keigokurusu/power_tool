@@ -88,7 +88,7 @@ if csv_files:
         df["投稿日時"] = df["収集日時"]
     
     st.sidebar.header("📊 分析条件設定")
-    company = st.sidebar.selectbox("分析対象の事業者", ["東京電力", "関西電力", "中部電力", "九州電力", "リボンエナジー", "オクトパスエナジー", "looopでんき"])
+    company = st.sidebar.selectbox("分析対象の事業者", ["北海道電力", "東北電力", "東京電力", "中部電力", "北陸電力", "関西電力", "中国電力", "四国電力", "九州電力", "リボンエナジー", "オクトパスエナジー", "Looopでんき"])
     
     period_type = st.sidebar.radio(
         "期間の指定方法", 
