@@ -211,7 +211,7 @@ if csv_files:
                 rep_posts = df_topic_view.sort_values(by='text_len', ascending=False).head(3)
                 
                 for idx, row in rep_posts.iterrows():
-                    icon = "🟢【満足】" if row['判定'] == "ポジティブ" else ("🔴【不慢】" if row['判定'] == "ネガティブ" else "⚪【その他】")
+                    icon = "🟢【満足】" if row['判定'] == "ポジティブ" else ("🔴【不満】" if row['判定'] == "ネガティブ" else "⚪【その他】")
                     st.info(f"{icon} {row['本文']}")
                 
                 st.write("")
